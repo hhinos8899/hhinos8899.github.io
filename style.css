@@ -1,3 +1,14 @@
+.zoom-panel{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  margin:15px 0 5px;
+  color:#9aa4ad;
+}
+.zoom-panel input[type=range]{
+  width:160px;
+}
 html { height: 100%; }
 body{
   margin:0;
