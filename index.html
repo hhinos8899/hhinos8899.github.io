@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Prediction</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+  <div id="content-wrapper">
+    <div class="container">
+      <h1 class="title">AI Prediction</h1>
+
+      <div class="prediction-box">
+        <div class="prediction-result">
+          <span class="result-label" id="resultLabel">AI</span>
+          <span class="percentage" id="resultPct"></span>
+        </div>
+        <p class="prediction-text" id="predictionText">请稍候...</p>
+        <div class="algo-bar" id="algoBar">当前算法：-｜胜率：-｜连错：0</div>
+      </div>
+
+      <div class="game-record">
+        <div class="record-row" id="recordDisplay"></div>
+      </div>
+
+      <div class="control-panel">
+        <button class="btn player-btn" onclick="recordResult('P')">Player (P)</button>
+        <button class="btn banker-btn" onclick="recordResult('B')">Banker (B)</button>
+        <button class="btn back-btn" onclick="undoLastMove()">← Back</button>
+        <button class="btn reset-btn" onclick="resetGame()">Reset</button>
+      </div>
+
+      <!-- 趋势图（必须保留） -->
+      <div class="chart-container">
+        <canvas id="trendChart"></canvas>
+      </div>
+
+      <button class="instruction-btn" onclick="toggleInstructions()">📋 查看胜率/说明</button>
+
+      <footer class="footer">
+        <p>© 2026</p>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 说明弹窗 -->
+  <div id="instModal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-title">说明 / 实时胜率</div>
+      <div id="instText" class="modal-text"></div>
+      <button class="btn back-btn" onclick="closeInstructions()">关闭</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
