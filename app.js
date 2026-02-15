@@ -1,3 +1,22 @@
+// ===== 缩放（放大 / 缩小）=====
+document.addEventListener('DOMContentLoaded', () => {
+  const zoomSlider = document.getElementById('zoomSlider');
+  const zoomValue  = document.getElementById('zoomValue');
+  const wrapper    = document.getElementById('content-wrapper');
+
+  if(!zoomSlider || !wrapper) return;
+
+  function applyZoom(v){
+    wrapper.style.transform = `scale(${v/100})`;
+    wrapper.style.transformOrigin = 'top center';
+    if(zoomValue) zoomValue.textContent = v + '%';
+  }
+
+  applyZoom(zoomSlider.value || 70);
+  zoomSlider.addEventListener('input', e => {
+    applyZoom(e.target.value);
+  });
+});
 /* =========================
    工具：解析 “BBPPBB→P，...” 成 Map
    - 支持：中文逗号/英文逗号/句号/换行
