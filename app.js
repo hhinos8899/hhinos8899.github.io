@@ -1,28 +1,23 @@
-// ===== 缩放（放大 / 缩小）=====
-document.addEventListener('DOMContentLoaded', () => {
-  const zoomSlider = document.getElementById('zoomSlider');
-  const zoomValue  = document.getElementById('zoomValue');
-  const wrapper    = document.getElementById('content-wrapper');
+/* =========================================================
+   整合版 app.js（保持原页面结构不变）
+   - 缩放：有 zoomSlider/zoomValue 就启用
+   - 趋势图：canvas id = trendChart
+   - 预测UI：resultLabel / resultPct / predictionText
+   - 记录UI：recordDisplay
+   - 信息条：algoBar（有就更新，没有就忽略）
+   - 弹窗：instModal / instText（有就支持 toggleInstructions）
+   - 按钮：player-btn banker-btn back-btn reset-btn instruction-btn（有就禁用）
+   - 算法：A/B/C/D/E/F 全真规则
+   - 调度：实时胜率最高；当前算法连错>=3 强制换到其它最高胜率
+   - 撤销：从头重算（最稳，不会算错）
+========================================================= */
 
-  if(!zoomSlider || !wrapper) return;
-
-  function applyZoom(v){
-    wrapper.style.transform = `scale(${v/100})`;
-    wrapper.style.transformOrigin = 'top center';
-    if(zoomValue) zoomValue.textContent = v + '%';
-  }
-
-  applyZoom(zoomSlider.value || 70);
-  zoomSlider.addEventListener('input', e => {
-    applyZoom(e.target.value);
-  });
-});
 /* =========================
    工具：解析 “BBPPBB→P，...” 成 Map
    - 支持：中文逗号/英文逗号/句号/换行
    - 支持：→ / -> / =>
    - p 统一当 P
-   - 重复 key：按最后一次为准（Map 默认）
+   - 重复 key：以最后一次为准（Map 默认）
 ========================= */
 function buildRuleMapFromText(raw) {
   const m = new Map();
@@ -41,18 +36,20 @@ function buildRuleMapFromText(raw) {
     const p = part.replace(/\s/g, "");
     const seg = p.split(/→|->|=>/);
     if (seg.length !== 2) continue;
+
     const key = seg[0].trim();
     let val = seg[1].trim();
     if (val === "p") val = "P";
+
     if (!key || (val !== "B" && val !== "P")) continue;
     m.set(key, val);
   }
   return m;
 }
 
-function suffix(arr, n){
-  if(arr.length < n) return null;
-  return arr.slice(arr.length - n).join('');
+function suffix(arr, n) {
+  if (arr.length < n) return null;
+  return arr.slice(arr.length - n).join("");
 }
 
 /* =========================
@@ -60,15 +57,15 @@ function suffix(arr, n){
 ========================= */
 const PCT_LOOP = [92, 95, 97, 97, 95, 92];
 let pctIdx = 0;
-function nextFixedPercent(){
+function nextFixedPercent() {
   const v = PCT_LOOP[pctIdx];
   pctIdx = (pctIdx + 1) % PCT_LOOP.length;
   return v;
 }
-function fmtPct(v){ return `+${Number(v).toFixed(2)}%`; }
+function fmtPct(v) { return `+${Number(v).toFixed(2)}%`; }
 
 /* =========================
-   A：你最早发的 LOCAL_RULES（递增窗口 4→5→6，最短3位）
+   A：你最早那套（递增窗口 4→5→6，最短3位）
 ========================= */
 const RULES_A = new Map([
   ["BBPP","P"],
@@ -98,39 +95,52 @@ const RULES_A = new Map([
   ["PBPP","P"],
 ]);
 
-let aWindowN = 4; // 4→5→6
-function predictA(gameHistory){
-  if(gameHistory.length < 4){
-    aWindowN = 4;
-    return null;
-  }
-  const maxLen = Math.min(aWindowN, gameHistory.length);
-  for(let len = maxLen; len >= 3; len--){
-    const s = suffix(gameHistory, len);
-    if(s && RULES_A.has(s)) {
+let aWindowN = 4;
+function predictA(history) {
+  if (history.length < 4) { aWindowN = 4; return null; }
+
+  const maxLen = Math.min(aWindowN, history.length);
+  for (let len = maxLen; len >= 3; len--) {
+    const s = suffix(history, len);
+    if (s && RULES_A.has(s)) {
       aWindowN = 4; // 命中回到4
       return RULES_A.get(s);
     }
   }
-  if(aWindowN < 6) aWindowN += 1;
+  if (aWindowN < 6) aWindowN += 1;
   return null;
 }
 
 /* =========================
-   B：固定窗口=4
-   你说“B固定4”，但没再给一套新的“B专用Map”，
-   所以这里严格按你已给的规则：只取 RULES_A 里 key长度=4 的那部分作为 B 的规则库。
-   （不会碰A的递增逻辑；B只看4位）
+   B：固定窗口=4（你定的 16 条）
 ========================= */
-const RULES_B = new Map([...RULES_A.entries()].filter(([k]) => k.length === 4));
-function predictB(gameHistory){
-  if(gameHistory.length < 4) return null;
-  const s = suffix(gameHistory, 4);
+const RULES_B = new Map([
+  ["PBPB","B"],
+  ["PPBP","P"],
+  ["PBBB","B"],
+  ["PPPB","B"],
+  ["PPPP","P"],
+  ["PPBB","P"],
+  ["PBBP","P"],
+  ["PBPP","P"],
+  ["BBPP","P"],
+  ["BBPB","B"],
+  ["BPPP","P"],
+  ["BPBP","P"],
+  ["BBBB","B"],
+  ["BBBP","P"],
+  ["BPPB","P"],
+  ["BPBB","B"],
+]);
+
+function predictB(history) {
+  if (history.length < 4) return null;
+  const s = suffix(history, 4);
   return RULES_B.get(s) || null;
 }
 
 /* =========================
-   C：你之前“重新发三段”里的 第一段（规则C，按6）
+   C：你“规则C”那一整段（固定末6）
 ========================= */
 const RULES_C_TEXT = `
 BBPPBB→P，BBPPBP→P，BBPPPB→P，BBBPPP→P，BBBBPP→P，BBBBBP→B，BBPPPP→P，
@@ -147,14 +157,15 @@ PBBBPP→B，PPBBBP→B，PBPBPP→P，PPBPPP→P，PBPPPB→P，PPBPBB→B，
 BPBBBP→B，BBPBPP→B，BBPBPP→P
 `;
 const RULES_C = buildRuleMapFromText(RULES_C_TEXT);
-function predictC(gameHistory){
-  if(gameHistory.length < 6) return null;
-  const s = suffix(gameHistory, 6);
+
+function predictC(history) {
+  if (history.length < 6) return null;
+  const s = suffix(history, 6);
   return RULES_C.get(s) || null;
 }
 
 /* =========================
-   D：你“重新发三段”里的 第二段+第三段（规则D，按6）
+   D：你“规则D”那一整段（固定末6）
 ========================= */
 const RULES_D_TEXT = `
 BBPPBB→B，BBPPBP→B，BBPPPB→B，BBBPPP→P，BBBBPP→B，BBBBBP→B，BBPPPP→B，
@@ -170,14 +181,15 @@ PBPPBP→B，PPBPPB→B，PBBPBP→P，PBBBPP→B，PPBBBP→P，PBPBPP→P，PP
 PBPPPB→B，PPBPBB→B，PBPPBB→B，PBBBBP→P
 `;
 const RULES_D = buildRuleMapFromText(RULES_D_TEXT);
-function predictD(gameHistory){
-  if(gameHistory.length < 6) return null;
-  const s = suffix(gameHistory, 6);
+
+function predictD(history) {
+  if (history.length < 6) return null;
+  const s = suffix(history, 6);
   return RULES_D.get(s) || null;
 }
 
 /* =========================
-   E：你最后确认的“正宗第5套规则”（按6）
+   E：你“第5套（E）正宗版”（固定末6：B段+P段）
 ========================= */
 const RULES_E_B = buildRuleMapFromText(`
 BBPPBB→B，BBPPBP→P。BBPPPB→B，BBBPPP→B。BBBBPP→P，BBBBBP→P。BBPPPP→B，BPBPBP→p。
@@ -185,25 +197,54 @@ BPBPPB→B，BBBPPB→P。BBBPBB→P，BBBPBP→B。BPPBBP→B，BPPBBB→P。BP
 BPPPPB→B，BBBBPB→B。BBPBPB→P，BBPPPB→P。BBBPPB→P，BPPBPP→P。BPBBPB→B，BBPBBP→P，
 BPPBPB→B，BBPPPB→B。BPBPBB→B。BBPBBB→P。BPBBBP→P，BBPBPP→B，BPBBPP→P，BPBPPP→B。BPPPPP→P。
 `);
+
 const RULES_E_P = buildRuleMapFromText(`
 PPBBPP→P，PPBBPB→B，PPBBBP→P，PPPBBB→P，PPPPBB→B，PPPPPB→B，PPBBBB→P，
 PBPBPB→B，PBPBBP→P，PPPBBP→B，PPPBPP→B，PPPBPB→P，PBBPPB→P，PBBPPP→B，PBBBPP→P，
 PBBBPB→B，PPPPBP→P，PPBPBP→B，PPBBBP→P，PPPBBP→B，PBBPBB→B，PBPPBP→P，PPBPPB→P，
 PBBPBP→P，PBBBPP→P，PPBBBP→P，PBPBPP→P，PPBPPP→B，PBPPPB→B，PPBPBB→P，PBPPBB→B，PBBBBP→P
 `);
-function predictE(gameHistory){
-  if(gameHistory.length < 6) return null;
-  const s = suffix(gameHistory, 6);
-  if(s[0] === 'B') return RULES_E_B.get(s) || null;
-  if(s[0] === 'P') return RULES_E_P.get(s) || null;
+
+function predictE(history) {
+  if (history.length < 6) return null;
+  const s = suffix(history, 6);
+  if (s[0] === "B") return RULES_E_B.get(s) || null;
+  if (s[0] === "P") return RULES_E_P.get(s) || null;
   return null;
 }
 
 /* =========================
-   引擎：实时胜率 + 当前算法连错3切换
+   F：规则六（固定末6：B段+P段）
 ========================= */
-function makeAlgo(name, predictor){
-  return { name, predictor, total:0, hit:0, loseStreak:0 };
+const RULES_F_P = buildRuleMapFromText(`
+PPBBPP→B ，PPBBPB→P，PPPBBB→B。PPPPBB→P。PPPPPB→B，PPBBBB→B。
+PBPBPB→P，PBPBBP→P。PPPBBP→P，PPPBPP→B。PPPBPB→P，PBBPPP→P。
+PBBBPP→B，PBBBPB→P。PBBBBP→P，PPPPBP→B。PPBPBP→B，PPBBBP→P。
+PPPBBP→P，PBBPBB→P。PBPPBP→B，PPBPPB→B，PBBPBP→B，PPBBBP→P。
+PBBBPP→B，PBPBPP→B。PPBPPP→P，PBPPBB→B。PBPPPP→P，PBPPPB→B。
+PPBPBB→P，PBPPBB→P
+`);
+
+const RULES_F_B = buildRuleMapFromText(`
+BBPPBB→P，BBPPBP→B。BBPPPB→B，BBBPPP→P。BBBBPP→B，BBBBBP→P。BBPPPP→P，BPBPBP→B。
+BPBPPB→B，BBBPPB→B。BBBPBB→P，BBBPBP→B。BPPBBP→P，BPPBBB→B。BPPPBB→P，BPPPBP→B。
+BPPPPB→B，BBBBPB→P。BBPBPB→P，BBPPPB→B。BPPBPP→B，BPBBPB→P。BBPBBP→P，BPPBPB→P。
+BBPPPB→B，BPBPBB→P。BBPBBB→B，BPBBBP→P。BBPBPP→B，BPBBPP→B。BPBPPP→P，BPPPPP→P。
+`);
+
+function predictF(history) {
+  if (history.length < 6) return null;
+  const s = suffix(history, 6);
+  if (s[0] === "B") return RULES_F_B.get(s) || null;
+  if (s[0] === "P") return RULES_F_P.get(s) || null;
+  return null;
+}
+
+/* =========================
+   引擎：实时胜率 + 连错3切换
+========================= */
+function makeAlgo(name, predictor) {
+  return { name, predictor, total: 0, hit: 0, loseStreak: 0 };
 }
 
 const ALGOS = [
@@ -212,132 +253,152 @@ const ALGOS = [
   makeAlgo("C", predictC),
   makeAlgo("D", predictD),
   makeAlgo("E", predictE),
+  makeAlgo("F", predictF),
 ];
 
-function algoByName(name){ return ALGOS.find(a => a.name === name); }
-function rateOf(a){ return a.total === 0 ? 0 : a.hit / a.total; }
+function algoByName(name) { return ALGOS.find(a => a.name === name); }
+function rateOf(a) { return a.total === 0 ? 0 : (a.hit / a.total); }
 
 /* =========================
-   UI 状态
+   全局状态
 ========================= */
 let gameHistory = [];
 let waiting = false;
 let timer = null;
 let trendChart = null;
 
-// 上一手“预测快照”（用于本手结算）
+// 上一手预测快照（用来结算本手胜率）
 let pending = {
   byAlgo: new Map(),      // algoName -> pred
-  activeAlgoName: null,  // 对外显示用哪个算法
-  activePred: null,      // 对外显示预测
+  activeAlgoName: null,   // 对外显示使用算法
+  activePred: null,       // 对外显示预测
 };
 
-function byId(id){ return document.getElementById(id); }
-function $(sel){ return document.querySelector(sel); }
+/* =========================
+   DOM 工具
+========================= */
+function byId(id) { return document.getElementById(id); }
+function q(sel) { return document.querySelector(sel); }
 
-function setButtonsDisabled(disabled){
-  const p = $('.player-btn');
-  const b = $('.banker-btn');
-  const back = $('.back-btn');
-  const reset = $('.reset-btn');
-  const inst = $('.instruction-btn');
-  if(p) p.disabled = disabled;
-  if(b) b.disabled = disabled;
-  if(back) back.disabled = disabled;
-  if(reset) reset.disabled = disabled;
-  if(inst) inst.disabled = disabled;
+function setButtonsDisabled(disabled) {
+  const p = q(".player-btn");
+  const b = q(".banker-btn");
+  const back = q(".back-btn");
+  const reset = q(".reset-btn");
+  const inst = q(".instruction-btn");
+  if (p) p.disabled = disabled;
+  if (b) b.disabled = disabled;
+  if (back) back.disabled = disabled;
+  if (reset) reset.disabled = disabled;
+  if (inst) inst.disabled = disabled;
 }
 
-function renderHistory(){
-  const el = byId('recordDisplay');
-  if(!el) return;
-  el.innerHTML = '';
+/* =========================
+   UI：记录
+========================= */
+function renderHistory() {
+  const el = byId("recordDisplay");
+  if (!el) return;
+  el.innerHTML = "";
   gameHistory.forEach(t => {
-    const d = document.createElement('div');
+    const d = document.createElement("div");
     d.className = `record-item ${t.toLowerCase()}`;
     d.textContent = t;
     el.appendChild(d);
   });
 }
 
-/* 趋势图（累计B/P） */
-function updateTrendChart(){
-  const canvas = byId('trendChart');
-  if(!canvas || typeof Chart === 'undefined') return;
+/* =========================
+   UI：趋势图（累计B/P）
+========================= */
+function updateTrendChart() {
+  const canvas = byId("trendChart");
+  if (!canvas) return;
+  if (typeof Chart === "undefined") return;
 
-  const ctx = canvas.getContext('2d');
-  if(trendChart) trendChart.destroy();
+  const ctx = canvas.getContext("2d");
+  if (trendChart) trendChart.destroy();
 
   let b = 0, p = 0;
   const banker = [];
   const player = [];
+
   gameHistory.forEach(x => {
-    if(x === 'B') b++;
-    if(x === 'P') p++;
+    if (x === "B") b++;
+    if (x === "P") p++;
     banker.push(b);
     player.push(p);
   });
 
   trendChart = new Chart(ctx, {
-    type: 'line',
+    type: "line",
     data: {
-      labels: banker.map((_, i) => `Hand ${i+1}`),
+      labels: banker.map((_, i) => `Hand ${i + 1}`),
       datasets: [
-        { label:'Banker Wins', data: banker, borderColor:'#ff6b6b', fill:false, tension:0.25 },
-        { label:'Player Wins', data: player, borderColor:'#4ecdc4', fill:false, tension:0.25 },
-      ]
+        { label: "Banker", data: banker, borderColor: "#ff4d4d", tension: 0.25, fill: false },
+        { label: "Player", data: player, borderColor: "#28a745", tension: 0.25, fill: false },
+      ],
     },
     options: {
-      responsive:true,
-      plugins:{ legend:{ labels:{ color:'#e6edf3' } } },
-      scales:{
-        y:{ beginAtZero:true, grid:{ color:'rgba(255,255,255,.1)' }, ticks:{ color:'#9aa4ad' } },
-        x:{ grid:{ color:'rgba(255,255,255,.1)' }, ticks:{ color:'#9aa4ad' } },
-      }
-    }
+      responsive: true,
+      plugins: { legend: { labels: { color: "#e6edf3" } } },
+      scales: {
+        x: { ticks: { color: "#9aa4ad" }, grid: { color: "rgba(255,255,255,.1)" } },
+        y: { beginAtZero: true, ticks: { color: "#9aa4ad" }, grid: { color: "rgba(255,255,255,.1)" } },
+      },
+    },
   });
 }
 
-function showPending(){
-  const label = byId('resultLabel');
-  const pctEl = byId('resultPct');
-  const text = byId('predictionText');
-  if(label){
-    label.textContent = 'AI建议';
-    label.classList.remove('player','banker');
+/* =========================
+   UI：预测显示
+========================= */
+function showPending() {
+  const label = byId("resultLabel");
+  const pctEl = byId("resultPct");
+  const text = byId("predictionText");
+
+  if (label) {
+    label.textContent = "AI建议";
+    label.classList.remove("player", "banker");
   }
-  if(pctEl) pctEl.textContent = '...%';
-  if(text) text.textContent = '人工智能正在预测，请稍后...';
+  if (pctEl) pctEl.textContent = "...%";
+  if (text) text.textContent = "人工智能正在预测，请稍后...";
 }
 
-function showResult(side, pct){
-  const label = byId('resultLabel');
-  const pctEl = byId('resultPct');
-  const text = byId('predictionText');
-  if(label){
+function showResult(side, pct) {
+  const label = byId("resultLabel");
+  const pctEl = byId("resultPct");
+  const text = byId("predictionText");
+
+  if (label) {
     label.textContent = side;
-    label.classList.remove('player','banker');
-    label.classList.add(side === 'B' ? 'banker' : 'player');
+    label.classList.remove("player", "banker");
+    label.classList.add(side === "B" ? "banker" : "player");
   }
-  if(pctEl) pctEl.textContent = fmtPct(pct);
-  if(text) text.textContent = side;
+  if (pctEl) pctEl.textContent = fmtPct(pct);
+  if (text) text.textContent = side;
 }
 
-function showIdle(msg){
-  const label = byId('resultLabel');
-  const pctEl = byId('resultPct');
-  const text = byId('predictionText');
-  if(label){
-    label.textContent = 'AI';
-    label.classList.remove('player','banker');
+function showIdle(msg) {
+  const label = byId("resultLabel");
+  const pctEl = byId("resultPct");
+  const text = byId("predictionText");
+
+  if (label) {
+    label.textContent = "AI";
+    label.classList.remove("player", "banker");
   }
-  if(pctEl) pctEl.textContent = '';
-  if(text) text.textContent = msg || '请稍候...';
+  if (pctEl) pctEl.textContent = "";
+  if (text) text.textContent = msg || "请稍候...";
 }
 
-function updateAlgoBar(){
-  const bar = byId('algoBar');
-  if(!bar) return;
+/* =========================
+   UI：算法条（有就更新，没有就忽略）
+========================= */
+function updateAlgoBar() {
+  const bar = byId("algoBar");
+  if (!bar) return;
   const name = pending.activeAlgoName || "-";
   const a = name !== "-" ? algoByName(name) : null;
   const r = a ? (rateOf(a) * 100).toFixed(2) + "%" : "-";
@@ -345,41 +406,49 @@ function updateAlgoBar(){
   bar.textContent = `当前算法：${name}｜胜率：${r}｜连错：${ls}`;
 }
 
-/* 下一手：计算每个算法是否能出预测 */
-function computeAllPredictions(){
+/* =========================
+   计算下一手：各算法预测
+========================= */
+function computeAllPredictions() {
   const map = new Map();
-  for(const a of ALGOS){
+  for (const a of ALGOS) {
     const pred = a.predictor(gameHistory);
-    if(pred === 'B' || pred === 'P') map.set(a.name, pred);
+    if (pred === "B" || pred === "P") map.set(a.name, pred);
   }
   return map;
 }
 
-/* 本手录入结果时：用上一手 pending 进行结算 */
-function scoreWithActual(actual){
-  if(!pending || pending.byAlgo.size === 0) return;
+/* =========================
+   结算：用上一手 pending 结算本手胜率
+========================= */
+function scoreWithActual(actual) {
+  if (!pending || pending.byAlgo.size === 0) return;
 
-  // 所有算法：只要它上一手出过预测，就记入胜率
-  for(const [name, pred] of pending.byAlgo.entries()){
+  // 所有算法：上一手只要出过预测，就计入胜率
+  for (const [name, pred] of pending.byAlgo.entries()) {
     const algo = algoByName(name);
-    if(!algo) continue;
+    if (!algo) continue;
     algo.total += 1;
-    if(pred === actual) algo.hit += 1;
+    if (pred === actual) algo.hit += 1;
   }
 
-  // 当前对外算法：单独维护连错
-  if(pending.activeAlgoName && pending.activePred){
+  // 当前使用算法：连错统计
+  if (pending.activeAlgoName && pending.activePred) {
     const active = algoByName(pending.activeAlgoName);
-    if(active){
-      if(pending.activePred === actual) active.loseStreak = 0;
+    if (active) {
+      if (pending.activePred === actual) active.loseStreak = 0;
       else active.loseStreak += 1;
     }
   }
 }
 
-/* 选择对外算法：胜率最高；若当前算法连错>=3，则强制换到“其它算法里胜率最高” */
-function pickActive(predMap){
-  if(predMap.size === 0) return null;
+/* =========================
+   选择对外算法
+   - 默认：在“本手能预测”的算法里，胜率最高者
+   - 若当前算法连错>=3：强制排除当前算法再选
+========================= */
+function pickActive(predMap) {
+  if (predMap.size === 0) return null;
 
   const currentName = pending.activeAlgoName;
   const currentAlgo = currentName ? algoByName(currentName) : null;
@@ -388,34 +457,35 @@ function pickActive(predMap){
   const candidates = ALGOS
     .filter(a => predMap.has(a.name))
     .filter(a => !mustSwitch || a.name !== currentName)
-    .sort((x,y) => rateOf(y) - rateOf(x));
+    .slice()
+    .sort((x, y) => rateOf(y) - rateOf(x));
 
-  if(candidates.length > 0) return candidates[0].name;
+  if (candidates.length > 0) return candidates[0].name;
 
-  // 如果强制切换导致没候选（极少），退回所有可预测的最高胜率
+  // 极少情况：强制切换但只剩它能预测，则退回所有可预测的最高胜率
   const fallback = ALGOS
     .filter(a => predMap.has(a.name))
-    .sort((x,y) => rateOf(y) - rateOf(x));
+    .slice()
+    .sort((x, y) => rateOf(y) - rateOf(x));
+
   return fallback.length ? fallback[0].name : null;
 }
 
-function updatePrediction(){
-  if(timer){ clearTimeout(timer); timer = null; }
+/* =========================
+   生成下一手预测（2秒延迟）
+========================= */
+function updatePrediction() {
+  if (timer) { clearTimeout(timer); timer = null; }
 
   const predMap = computeAllPredictions();
   const activeName = pickActive(predMap);
   const activePred = activeName ? predMap.get(activeName) : null;
 
-  pending = {
-    byAlgo: predMap,
-    activeAlgoName: activeName,
-    activePred: activePred,
-  };
-
+  pending = { byAlgo: predMap, activeAlgoName: activeName, activePred: activePred };
   updateAlgoBar();
 
-  if(!activePred){
-    showIdle('请稍候...');
+  if (!activePred) {
+    showIdle("请稍候...");
     return;
   }
 
@@ -433,110 +503,37 @@ function updatePrediction(){
   }, 2000);
 }
 
-/* 说明弹窗：显示每个算法实时胜率 */
-window.toggleInstructions = function(){
-  const modal = byId('instModal');
-  const text = byId('instText');
-  if(!modal || !text) return;
-
-  const lines = [];
-  lines.push("算法规则：");
-  lines.push("A：4→5→6递增窗口，最长后缀优先，命中回到4（最短3位）");
-  lines.push("B：固定只看最后4位");
-  lines.push("C：固定只看最后6位（你的规则C）");
-  lines.push("D：固定只看最后6位（你的规则D）");
-  lines.push("E：固定只看最后6位（你确认的第5套正宗规则）");
-  lines.push("");
-  lines.push("调度：实时胜率最高出预测；当前算法连错3把 → 自动切换到其它算法里胜率最高者");
-  lines.push("");
-  lines.push("实时胜率（命中/出手）：");
-
-  const sorted = [...ALGOS].sort((x,y) => rateOf(y) - rateOf(x));
-  for(const a of sorted){
-    const r = (rateOf(a) * 100).toFixed(2) + "%";
-    lines.push(`- ${a.name}: ${a.hit}/${a.total} = ${r}（连错：${a.loseStreak}）`);
-  }
-
-  text.textContent = lines.join("\n");
-  modal.classList.remove('hidden');
-};
-
-window.closeInstructions = function(){
-  const modal = byId('instModal');
-  if(modal) modal.classList.add('hidden');
-};
-
-/* ============ 按钮 ============ */
-window.recordResult = function(type){
-  if(waiting) return;
-  if(type !== 'B' && type !== 'P') return;
-
-  scoreWithActual(type);
-  gameHistory.push(type);
-
-  renderHistory();
-  updateTrendChart();
-  updatePrediction();
-};
-
-window.undoLastMove = function(){
-  if(waiting) return;
-  gameHistory.pop();
-  rebuildAllFromScratch();
-};
-
-window.resetGame = function(){
-  if(waiting) return;
-
-  gameHistory = [];
-  pctIdx = 0;
-  aWindowN = 4;
-  if(timer){ clearTimeout(timer); timer = null; }
-
-  for(const a of ALGOS){
-    a.total = 0;
-    a.hit = 0;
-    a.loseStreak = 0;
-  }
-
-  pending = { byAlgo:new Map(), activeAlgoName:null, activePred:null };
-
-  setButtonsDisabled(false);
-  renderHistory();
-  updateTrendChart();
-  showIdle('请稍候...');
-  updateAlgoBar();
-  updatePrediction();
-};
-
-/* 撤销：从头重算（简单稳定，不会算错） */
-function rebuildAllFromScratch(){
-  if(timer){ clearTimeout(timer); timer = null; }
+/* =========================
+   撤销：从头重算（最稳）
+========================= */
+function rebuildAllFromScratch() {
+  if (timer) { clearTimeout(timer); timer = null; }
   waiting = false;
   setButtonsDisabled(false);
 
   const saved = [...gameHistory];
 
-  // 清空所有
+  // 清空统计
   gameHistory = [];
   pctIdx = 0;
   aWindowN = 4;
-  for(const a of ALGOS){
+
+  for (const a of ALGOS) {
     a.total = 0;
     a.hit = 0;
     a.loseStreak = 0;
   }
-  pending = { byAlgo:new Map(), activeAlgoName:null, activePred:null };
 
-  // 先生成第一手预测（通常无）
+  pending = { byAlgo: new Map(), activeAlgoName: null, activePred: null };
+
+  // 先算第一手预测（通常无）
   updatePrediction();
 
-  // 重放
-  for(const outcome of saved){
+  // 重放：先结算再推进（重放不走2秒动画）
+  for (const outcome of saved) {
     scoreWithActual(outcome);
     gameHistory.push(outcome);
 
-    // 直接更新 pending（不走2秒动画）
     const predMap = computeAllPredictions();
     const activeName = pickActive(predMap);
     const activePred = activeName ? predMap.get(activeName) : null;
@@ -548,11 +545,115 @@ function rebuildAllFromScratch(){
   updatePrediction();
 }
 
-/* 初始化 */
-document.addEventListener('DOMContentLoaded', function(){
+/* =========================
+   弹窗：胜率/说明（有就启用）
+========================= */
+window.toggleInstructions = function () {
+  const modal = byId("instModal");
+  const text = byId("instText");
+  if (!modal || !text) return;
+
+  const lines = [];
+  lines.push("算法：A/B/C/D/E/F（后台同时统计胜率）");
+  lines.push("调度：实时胜率最高出预测；当前算法连错3把→强制切到其它最高胜率");
+  lines.push("");
+
+  const sorted = [...ALGOS].sort((x, y) => rateOf(y) - rateOf(x));
+  for (const a of sorted) {
+    const r = (rateOf(a) * 100).toFixed(2) + "%";
+    lines.push(`- ${a.name}: ${a.hit}/${a.total} = ${r}（连错：${a.loseStreak}）`);
+  }
+
+  text.textContent = lines.join("\n");
+  modal.classList.remove("hidden");
+};
+
+window.closeInstructions = function () {
+  const modal = byId("instModal");
+  if (modal) modal.classList.add("hidden");
+};
+
+/* =========================
+   缩放（有滑块就启用；不改变你其它内容）
+   - wrapper: #content-wrapper
+   - slider:  #zoomSlider
+   - label:   #zoomValue
+========================= */
+function initZoom() {
+  const wrapper = byId("content-wrapper");
+  const slider = byId("zoomSlider");
+  const label = byId("zoomValue");
+  if (!wrapper || !slider) return;
+
+  const apply = (v) => {
+    const n = Number(v);
+    if (Number.isNaN(n)) return;
+    wrapper.style.transform = `scale(${n / 100})`;
+    wrapper.style.transformOrigin = "top center";
+    if (label) label.textContent = `${n}%`;
+  };
+
+  apply(slider.value || 70);
+  slider.addEventListener("input", (e) => apply(e.target.value));
+}
+
+/* =========================
+   按钮
+========================= */
+window.recordResult = function (type) {
+  if (waiting) return;
+  if (type !== "B" && type !== "P") return;
+
+  // 先结算本手（用上一手预测）
+  scoreWithActual(type);
+
+  // 再写入历史
+  gameHistory.push(type);
+
   renderHistory();
   updateTrendChart();
-  showIdle('请稍候...');
+  updatePrediction();
+};
+
+window.undoLastMove = function () {
+  if (waiting) return;
+  gameHistory.pop();
+  rebuildAllFromScratch();
+};
+
+window.resetGame = function () {
+  if (waiting) return;
+
+  gameHistory = [];
+  pctIdx = 0;
+  aWindowN = 4;
+
+  if (timer) { clearTimeout(timer); timer = null; }
+
+  for (const a of ALGOS) {
+    a.total = 0;
+    a.hit = 0;
+    a.loseStreak = 0;
+  }
+
+  pending = { byAlgo: new Map(), activeAlgoName: null, activePred: null };
+
+  setButtonsDisabled(false);
+  renderHistory();
+  updateTrendChart();
+  showIdle("请稍候...");
+  updateAlgoBar();
+  updatePrediction();
+};
+
+/* =========================
+   初始化
+========================= */
+document.addEventListener("DOMContentLoaded", function () {
+  initZoom();
+  renderHistory();
+  updateTrendChart();
+  showIdle("请稍候...");
   updateAlgoBar();
   updatePrediction();
 });
